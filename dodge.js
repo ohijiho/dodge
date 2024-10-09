@@ -180,7 +180,11 @@ class Game {
       this.#stats.score++;
     }
 
-    for (let u = this.#units; u.next !== null; ) {
+    for (let u = this.#units; ; ) {
+      if (u.next === null) {
+        this.#units.tail = u;
+        break;
+      }
       if (u.next.removed) u.next = u.next.next;
       else u = u.next;
     }
