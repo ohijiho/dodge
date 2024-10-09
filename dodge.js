@@ -581,6 +581,28 @@ class Game {
         this.#vjInput(type, event);
         break;
     }
+
+    const s = this.#inputState;
+
+    let x = +s.kbd.right - +s.kbd.left;
+    let y = +s.kbd.up - +s.kbd.down;
+
+    if (s.vJoystick) {
+      x += s.vJoystick.x;
+      y += s.vJoystick.y;
+    }
+
+    const sqr = x ** 2 + y ** 2;
+    if (sqr > 1) {
+      const k = sqr ** -0.5;
+      x *= k;
+      y *= k;
+    }
+
+    const p = this.#player;
+    const speed = this.#config.playerMaxSpeed;
+    p.vx = x * speed;
+    p.vy = y * speed;
   }
 
   #kbdInput(type, event) {
@@ -612,19 +634,7 @@ class Game {
 
     if (key === "pause" && down) {
       this.#paused = !this.#paused;
-      return;
     }
-
-    const p = this.#player;
-    let x = +s.right - +s.left;
-    let y = +s.up - +s.down;
-    const speed = this.#config.playerMaxSpeed;
-    if (x !== 0 && y !== 0) {
-      x *= Math.SQRT1_2;
-      y *= Math.SQRT1_2;
-    }
-    p.vx = x * speed;
-    p.vy = y * speed;
   }
 
   #parseTouchEvent(type, event) {
@@ -706,11 +716,6 @@ class Game {
       s.x *= k;
       s.y *= k;
     }
-
-    const p = this.#player;
-    const speed = this.#config.playerMaxSpeed;
-    p.vx = s.x * speed;
-    p.vy = s.y * speed;
   }
 
   get canvas() {
