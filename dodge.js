@@ -115,7 +115,16 @@ class Game {
       tickRate,
 
       avgStatsRecencyWeight: 1 / 120,
+
+      vJoystick: {
+        r: 50,
+        pointerSize: 20,
+        background: "#ffffff80",
+        foreground: "#ffffff80",
+      },
     };
+
+    this.#paused = false;
   }
 
   #config;
@@ -126,8 +135,12 @@ class Game {
   #templates;
   #world;
   #inputState;
+  #paused;
+  #debugMessage = "";
 
   tick() {
+    if (this.#paused) return;
+
     // if (this.#player.removed) return;
 
     const t0 = new Date().getTime();
@@ -466,10 +479,49 @@ class Game {
         `tick: ${stats.tick}`,
         `avg_tick_time: ${stats.avgTickTime.toFixed(3)}ms`,
         `avg_draw_time: ${stats.avgRedrawTime.toFixed(3)}ms`,
+        this.#debugMessage,
       ];
       for (let i = 0; i < texts.length; i++) {
         ctx.fillText(texts[i], 5, 25 * (i + 1));
       }
+    }
+
+    {
+      const s = this.#inputState?.vJoystick;
+      if (s) {
+        const cfg = this.#config.vJoystick;
+
+        ctx.beginPath();
+        ctx.fillStyle = cfg.background;
+        ctx.arc(s.center.x, s.center.y, cfg.r, 0, 2 * Math.PI);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.fillStyle = cfg.foreground;
+        ctx.arc(
+          s.center.x + s.x * cfg.r,
+          s.center.y - s.y * cfg.r,
+          cfg.pointerSize,
+          0,
+          2 * Math.PI,
+        );
+        ctx.fill();
+      }
+    }
+
+    if (this.#paused) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = "#ffffffc0";
+      ctx.font = "50px arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "Spacebar to resume",
+        this.#canvas.width * 0.5,
+        this.#canvas.height * 0.25,
+      );
+      ctx.restore();
     }
 
     this.#stats.totalRedrawCount++;
@@ -502,17 +554,37 @@ class Game {
   }
 
   input(type, event) {
-    if (type !== "keydown" && type !== "keyup") return;
-
     if (!this.#inputState) {
       this.#inputState = {
-        left: false,
-        right: false,
-        up: false,
-        down: false,
+        kbd: {
+          left: false,
+          right: false,
+          up: false,
+          down: false,
+          pause: false,
+        },
+        vJoystick: null,
       };
     }
-    const s = this.#inputState;
+
+    switch (type) {
+      case "keydown":
+      case "keyup":
+        this.#kbdInput(type, event);
+        break;
+      case "mousedown":
+      case "mouseup":
+      case "mousemove":
+      case "touchstart":
+      case "touchend":
+      case "touchmove":
+        this.#vjInput(type, event);
+        break;
+    }
+  }
+
+  #kbdInput(type, event) {
+    const s = this.#inputState.kbd;
 
     const down = type == "keydown";
 
@@ -529,6 +601,7 @@ class Game {
       KeyJ: "down",
       KeyK: "up",
       KeyL: "right",
+      Space: "pause",
     }[event.code];
 
     if (!key) return;
@@ -536,6 +609,11 @@ class Game {
     if (s[key] === down) return;
 
     s[key] = down;
+
+    if (key === "pause" && down) {
+      this.#paused = !this.#paused;
+      return;
+    }
 
     const p = this.#player;
     let x = +s.right - +s.left;
@@ -547,6 +625,92 @@ class Game {
     }
     p.vx = x * speed;
     p.vy = y * speed;
+  }
+
+  #parseTouchEvent(type, event) {
+    const s = this.#inputState.vJoystick;
+    if (!s && type !== "mousedown" && type !== "touchstart") return null;
+
+    const { left, top } = this.#canvas.getBoundingClientRect();
+
+    if (type.startsWith("mouse")) {
+      if (type !== "mousemove" && event.button !== 0) return null;
+
+      return {
+        identifier: null,
+        x: event.clientX - left,
+        y: event.clientY - top,
+        type: { mousedown: "start", mousemove: "move", mouseup: "end" }[type],
+      };
+    }
+
+    if (!s) {
+      const touch = event.changedTouches[0];
+
+      return {
+        identifier: touch.identifier,
+        x: touch.clientX - left,
+        y: touch.clientY - top,
+        type: "start",
+      };
+    }
+
+    const touch = [...event.changedTouches].find(
+      (t) => t.identifier === s.identifier,
+    );
+    if (!touch) return null;
+
+    return {
+      x: touch.clientX - left,
+      y: touch.clientY - top,
+      type: { touchmove: "move", touchend: "end" }[type],
+    };
+  }
+
+  #vjInput(type, event) {
+    const touch = this.#parseTouchEvent(type, event);
+
+    if (!touch) return;
+
+    if (touch.type === "start") {
+      this.#inputState.vJoystick = {
+        identifier: touch.identifier,
+        center: {
+          x: touch.x,
+          y: touch.y,
+        },
+        x: 0,
+        y: 0,
+      };
+      return;
+    }
+
+    if (touch.type === "end") {
+      this.#inputState.vJoystick = null;
+      const p = this.#player;
+      p.vx = 0;
+      p.vy = 0;
+      return;
+    }
+
+    const s = this.#inputState.vJoystick;
+    if (!s) return;
+
+    const cfg = this.#config.vJoystick;
+
+    s.x = (touch.x - s.center.x) / cfg.r;
+    s.y = -(touch.y - s.center.y) / cfg.r;
+    const sqr = s.x ** 2 + s.y ** 2;
+    if (sqr > 1) {
+      const k = sqr ** -0.5;
+      s.x *= k;
+      s.y *= k;
+    }
+
+    const p = this.#player;
+    const speed = this.#config.playerMaxSpeed;
+    p.vx = s.x * speed;
+    p.vy = s.y * speed;
   }
 
   get canvas() {

@@ -37,9 +37,24 @@
         }
         game.input("keydown", e);
       });
-      document.body.addEventListener("keyup", (e) => {
-        game.input("keyup", e);
-      });
+      for (const type of ["keyup"]) {
+        document.body.addEventListener(type, (e) => {
+          game.input(type, e);
+        });
+      }
+      for (const type of [
+        "mousedown",
+        "mouseup",
+        "mousemove",
+        "touchstart",
+        "touchmove",
+        "touchend",
+      ]) {
+        game.canvas.addEventListener(type, (e) => {
+          e.preventDefault();
+          game.input(type, e);
+        });
+      }
 
       setInterval(() => {
         game.tick();
