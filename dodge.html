@@ -9,7 +9,8 @@
   <body style="margin: 0">
     <div id="game_container"></div>
     <script>
-      const game = new Game();
+      const tickRate = 100;
+      const game = new Game(tickRate);
       function resizeCanvas() {
         const canvas = game.canvas;
         const vw = Math.max(
@@ -27,10 +28,7 @@
       game.canvas.style.display = "block";
       game.canvas.style.background = "grey";
       document.getElementById("game_container").appendChild(game.canvas);
-      setInterval(() => {
-        game.tick();
-        game.redraw();
-      }, 1000 / 60);
+
       document.body.addEventListener("keydown", (e) => {
         if (e.code === "KeyF") {
           if (document.fullscreenElement) document.exitFullscreen();
@@ -43,8 +41,16 @@
         game.input("keyup", e);
       });
 
+      setInterval(() => {
+        game.tick();
+      }, 1000 / tickRate);
+      setInterval(() => {
+        game.redraw();
+      }, 1000 / 60);
+
       setTimeout(() => {
         resizeCanvas();
+        game.redraw();
       }, 0);
     </script>
   </body>

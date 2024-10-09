@@ -12,7 +12,7 @@ function gaussianRandom(mean = 0, stdev = 1) {
 }
 
 class Game {
-  constructor() {
+  constructor(tickRate) {
     this.#canvas = document.createElement("canvas");
     this.#units = {
       next: null,
@@ -24,23 +24,44 @@ class Game {
       score: 0,
       bulletCount: 0,
       tick: 0,
+      survivedTicks: 0,
       totalTickTime: 0,
       totalRedrawCount: 0,
       totalRedrawTime: 0,
+      avgTickTime: 0,
+      avgRedrawTime: 0,
     };
 
     this.#templates = {
       player: {
         type: "player",
         r: 0.1,
+        mass: 1,
         fillStyle: "yellow",
         collisionToBounds: "repulsion",
         checkCollision: true,
       },
       bullet: {
         type: "bullet",
-        r: 0.05,
+        r: 0.02,
+        mass: 0.1,
         fillStyle: "red",
+        collisionToBounds: "pass",
+        checkCollision: true,
+      },
+      largeBullet: {
+        type: "bullet",
+        r: 0.1,
+        mass: 3,
+        fillStyle: "red",
+        collisionToBounds: "pass",
+        checkCollision: true,
+      },
+      giantBullet: {
+        type: "bullet",
+        r: 0.5,
+        mass: 100,
+        fillStyle: "hotpink",
         collisionToBounds: "pass",
         checkCollision: true,
       },
@@ -75,20 +96,29 @@ class Game {
         minHeight: 6,
       },
     };
+    this.#config = {
+      background: "black",
+      text: "white",
+      grid: false,
+      binSize: 1,
+      spawnRate: 12 / tickRate,
+      spawnTable: [
+        [0.9, this.#templates.bullet],
+        [0.09, this.#templates.largeBullet],
+        [0.01, this.#templates.giantBullet],
+      ],
+      lnSpawnRateGrowth: 0.012 / tickRate,
+      bulletSpeed: 0.9 / tickRate,
+      lnBulletSpeedGrowth: 0.01 / tickRate,
+      bulletSpeedDeviationBase: 1.5,
+      playerMaxSpeed: 2.5 / tickRate,
+      tickRate,
+
+      avgStatsRecencyWeight: 1 / 120,
+    };
   }
 
-  #config = {
-    background: "black",
-    text: "white",
-    grid: false,
-    binSize: 1,
-    spawnRate: 0.05,
-    spawnRateGrowth: 1.001,
-    bulletSpeed: 0.01,
-    bulletSpeedGrowth: 1.001,
-    bulletSpeedDeviationBase: 1.1,
-    playerMaxSpeed: 0.05,
-  };
+  #config;
   #canvas;
   #units;
   #player;
@@ -98,7 +128,7 @@ class Game {
   #inputState;
 
   tick() {
-    if (this.#player.removed) return;
+    // if (this.#player.removed) return;
 
     const t0 = new Date().getTime();
 
@@ -147,7 +177,7 @@ class Game {
       let i = 0,
         n =
           this.#config.spawnRate *
-            this.#config.spawnRateGrowth ** this.#stats.tick -
+            Math.exp(this.#config.lnSpawnRateGrowth * this.#stats.tick) -
           Math.random();
       i < n;
       i++
@@ -157,27 +187,38 @@ class Game {
         x: (bounds.left + bounds.right) / 2,
         y: (bounds.top + bounds.bottom) / 2,
       };
+
+      let p = Math.random();
+      let tmp;
+      for (const [prob, t] of this.#config.spawnTable) {
+        if (p < prob) {
+          tmp = t;
+          break;
+        }
+        p -= prob;
+      }
+
       const dist =
-        this.#templates.bullet.r +
+        tmp.r +
         ((bounds.right - bounds.left) ** 2 +
           (bounds.top - bounds.bottom) ** 2) **
           0.5 /
           2;
       const th = Math.random() * 2 * Math.PI;
       this.createUnit(
-        this.#templates.bullet,
+        tmp,
         center.x + dist * Math.cos(th),
         center.y + dist * Math.sin(th),
         {
           ...makeVelocity(
             this.#config.bulletSpeed *
-              this.#config.bulletSpeedGrowth ** this.#stats.tick *
+              Math.exp(this.#config.lnBulletSpeedGrowth * this.#stats.tick) *
               this.#config.bulletSpeedDeviationBase ** gaussianRandom(),
             th + Math.PI + gaussianRandom(),
           ),
         },
       );
-      this.#stats.score++;
+      if (!this.#player.removed) this.#stats.score++;
     }
 
     for (let u = this.#units; ; ) {
@@ -197,8 +238,15 @@ class Game {
       this.#stats.bulletCount = n;
     }
     this.#stats.tick++;
+    if (!this.#player.removed) this.#stats.survivedTicks++;
 
-    this.#stats.totalTickTime += new Date().getTime() - t0;
+    const time = new Date().getTime() - t0;
+    this.#stats.totalTickTime += time;
+    const w = Math.max(
+      1 / this.#stats.tick,
+      this.#config.avgStatsRecencyWeight,
+    );
+    this.#stats.avgTickTime = this.#stats.avgTickTime * (1 - w) + time * w;
   }
 
   #doCollision() {
@@ -281,19 +329,20 @@ class Game {
         if (u.type === "bullet") {
           const d = [v.x - u.x, v.y - u.y];
           const rv = [v.vx - u.vx, v.vy - u.vy];
-          // k0 = rv[0] ** 2 + rv[1] ** 2
-          // k1 = i[0] ** 2 + i[1] ** 2 + (rv[0] + i[0]) ** 2 + (rv[1] + i[1]) ** 2
+          // k0 = m * rv[0] ** 2 + m * rv[1] ** 2
+          // k1 = i[0] ** 2 + i[1] ** 2 + m * (rv[0] + i[0] / m) ** 2 + m * (rv[1] + i[1] / m) ** 2
           // k0 = k1
-          // i[0] * rv[0] + i[1] * rv[1] + i[0] ** 2 + i[1] ** 2 = 0
+          // i[0] * rv[0] + i[1] * rv[1] + (1 + 1 / m) / 2 * (i[0] ** 2 + i[1] ** 2) = 0
           // i[0] = t * d[0], i[1] = t * d[1], t ≥ 0
-          // t * d[0] * rv[0] + t * d[1] * rv[1] + (t * d[0]) ** 2 + (t * d[1]) ** 2 = 0
-          // t * (d[0] ** 2 + d[1] ** 2) + d[0] * rv[0] + d[1] * rv[1] = 0
-          const t = -(d[0] * rv[0] + d[1] * rv[1]) / dsqr;
+          // t * d[0] * rv[0] + t * d[1] * rv[1] + (1 + 1 / m) / 2 * ((t * d[0]) ** 2 + (t * d[1]) ** 2) = 0
+          // (1 + 1 / m) / 2 * (d[0] ** 2 + d[1] ** 2) * t + d[0] * rv[0] + d[1] * rv[1] = 0
+          const im = u.mass / v.mass;
+          const t = ((-(d[0] * rv[0] + d[1] * rv[1]) / dsqr) * 2) / (1 + im);
           if (t > 0) {
             u.vx -= t * d[0];
             u.vy -= t * d[1];
-            v.vx += t * d[0];
-            v.vy += t * d[1];
+            v.vx += t * d[0] * im;
+            v.vy += t * d[1] * im;
           }
         }
       } else {
@@ -411,11 +460,12 @@ class Game {
       ctx.font = "20px arial";
       const stats = this.#stats;
       const texts = [
+        `Survived Time: ${(stats.survivedTicks / this.#config.tickRate).toFixed(2)}s`,
         `Score: ${stats.score}`,
         `Bullets: ${stats.bulletCount}`,
         `tick: ${stats.tick}`,
-        `avg_tick_time: ${(stats.totalTickTime / stats.tick).toFixed(3)}ms`,
-        `avg_draw_time: ${(stats.totalRedrawTime / stats.totalRedrawCount).toFixed(3)}ms`,
+        `avg_tick_time: ${stats.avgTickTime.toFixed(3)}ms`,
+        `avg_draw_time: ${stats.avgRedrawTime.toFixed(3)}ms`,
       ];
       for (let i = 0; i < texts.length; i++) {
         ctx.fillText(texts[i], 5, 25 * (i + 1));
@@ -423,7 +473,13 @@ class Game {
     }
 
     this.#stats.totalRedrawCount++;
-    this.#stats.totalRedrawTime += new Date().getTime() - t0;
+    const time = new Date().getTime() - t0;
+    this.#stats.totalRedrawTime += time;
+    const w = Math.max(
+      1 / this.#stats.totalRedrawCount,
+      this.#config.avgStatsRecencyWeight,
+    );
+    this.#stats.avgRedrawTime = this.#stats.avgRedrawTime * (1 - w) + time * w;
   }
 
   createUnit(template, x, y, props) {
@@ -431,6 +487,7 @@ class Game {
       template,
       type: template.type,
       r: props?.r ?? template.r,
+      mass: props?.mass ?? template.mass,
       x,
       y,
       vx: props?.vx ?? 0,
