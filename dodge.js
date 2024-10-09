@@ -41,6 +41,14 @@ class Game {
         collisionToBounds: "repulsion",
         checkCollision: true,
       },
+      corpse: {
+        type: "decoration",
+        r: 0.1,
+        mass: 1,
+        fillStyle: "grey",
+        collisionToBounds: "pass",
+        checkCollision: false,
+      },
       bullet: {
         type: "bullet",
         r: 0.02,
@@ -239,8 +247,13 @@ class Game {
         this.#units.tail = u;
         break;
       }
-      if (u.next.removed) u.next = u.next.next;
-      else u = u.next;
+      if (u.next.removed) {
+        if (u.next === this.#player) {
+          this.#paused = true;
+          this.createUnit(this.#templates.corpse, u.next.x, u.next.y);
+        }
+        u.next = u.next.next;
+      } else u = u.next;
     }
 
     {
@@ -516,11 +529,11 @@ class Game {
       ctx.font = "50px arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(
-        "Spacebar to resume",
-        this.#canvas.width * 0.5,
-        this.#canvas.height * 0.25,
-      );
+      let text = "Spacebar to resume";
+      if (this.#player.removed) {
+        text = `Survived ${this.#stats.survivedTicks / this.#config.tickRate}s`;
+      }
+      ctx.fillText(text, this.#canvas.width * 0.5, this.#canvas.height * 0.25);
       ctx.restore();
     }
 
