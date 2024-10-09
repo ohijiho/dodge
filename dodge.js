@@ -531,7 +531,7 @@ class Game {
       ctx.textBaseline = "middle";
       let text = "Spacebar to resume";
       if (this.#player.removed) {
-        text = `Survived ${this.#stats.survivedTicks / this.#config.tickRate}s`;
+        text = `Survived ${(this.#stats.survivedTicks / this.#config.tickRate).toFixed(2)}s`;
       }
       ctx.fillText(text, this.#canvas.width * 0.5, this.#canvas.height * 0.25);
       ctx.restore();
