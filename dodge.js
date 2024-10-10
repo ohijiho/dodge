@@ -12,7 +12,7 @@ function gaussianRandom(mean = 0, stdev = 1) {
 }
 
 class Game {
-  constructor(tickRate) {
+  constructor(tickRate, scoreBackend) {
     this.#canvas = document.createElement("canvas");
     this.#units = {
       next: null,
@@ -21,7 +21,7 @@ class Game {
     };
     this.#units.tail = this.#units;
     this.#stats = {
-      score: 0,
+      bulletsSpawned: 0,
       bulletCount: 0,
       tick: 0,
       survivedTicks: 0,
@@ -130,6 +130,8 @@ class Game {
         background: "#ffffff80",
         foreground: "#ffffff80",
       },
+
+      scoreBackend,
     };
 
     this.#paused = false;
@@ -239,7 +241,7 @@ class Game {
           ),
         },
       );
-      if (!this.#player.removed) this.#stats.score++;
+      this.#stats.bulletsSpawned++;
     }
 
     for (let u = this.#units; ; ) {
@@ -250,6 +252,7 @@ class Game {
       if (u.next.removed) {
         if (u.next === this.#player) {
           this.#paused = true;
+          this.#config.scoreBackend.record(this.#stats.survivedTicks);
           this.createUnit(this.#templates.corpse, u.next.x, u.next.y);
         }
         u.next = u.next.next;
@@ -487,12 +490,15 @@ class Game {
       const stats = this.#stats;
       const texts = [
         `Survived Time: ${(stats.survivedTicks / this.#config.tickRate).toFixed(2)}s`,
-        `Score: ${stats.score}`,
+        `Highest: ${(this.#config.scoreBackend.highest / this.#config.tickRate).toFixed(2)}s`,
         `Bullets: ${stats.bulletCount}`,
         `tick: ${stats.tick}`,
         `avg_tick_time: ${stats.avgTickTime.toFixed(3)}ms`,
         `avg_draw_time: ${stats.avgRedrawTime.toFixed(3)}ms`,
         this.#debugMessage,
+        ...this.#config.scoreBackend.list.map(
+          (x) => (x / this.#config.tickRate).toFixed(2) + "s",
+        ),
       ];
       for (let i = 0; i < texts.length; i++) {
         ctx.fillText(texts[i], 5, 25 * (i + 1));
@@ -524,16 +530,37 @@ class Game {
 
     if (this.#paused) {
       ctx.save();
-      ctx.beginPath();
-      ctx.fillStyle = "#ffffffc0";
-      ctx.font = "50px arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      let text = "Spacebar to resume";
       if (this.#player.removed) {
-        text = `Survived ${(this.#stats.survivedTicks / this.#config.tickRate).toFixed(2)}s`;
+        ctx.beginPath();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "50px arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.fillText(
+          `Survived ${(this.#stats.survivedTicks / this.#config.tickRate).toFixed(2)}s`,
+          this.#canvas.width * 0.5,
+          this.#canvas.height * 0.25,
+        );
+        if (this.#stats.survivedTicks == this.#config.scoreBackend.highest) {
+          ctx.fillText(
+            "Highest record!",
+            this.#canvas.width * 0.5,
+            this.#canvas.height * 0.25 + 55,
+          );
+        }
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = "#ffffffc0";
+        ctx.font = "50px arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(
+          "Spacebar to resume",
+          this.#canvas.width * 0.5,
+          this.#canvas.height * 0.25,
+        );
       }
-      ctx.fillText(text, this.#canvas.width * 0.5, this.#canvas.height * 0.25);
       ctx.restore();
     }
 
